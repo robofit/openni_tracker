@@ -8,6 +8,7 @@
 #include <XnOpenNI.h>
 #include <XnCodecIDs.h>
 #include <XnCppWrapper.h>
+#include <art_msgs/UserStatus.h>
 
 using std::string;
 
@@ -18,8 +19,17 @@ xn::UserGenerator  g_UserGenerator;
 XnBool g_bNeedPose   = FALSE;
 XnChar g_strPose[20] = "";
 
+int user_count = 0;
+bool calibration_in_progress = false;
+
+ros::Publisher user_pub;
+
+std::vector<int> calibrated_users;
+
+
 void XN_CALLBACK_TYPE User_NewUser(xn::UserGenerator& generator, XnUserID nId, void* pCookie) {
 	ROS_INFO("New User %d", nId);
+    ++user_count;
 
 	if (g_bNeedPose)
 		g_UserGenerator.GetPoseDetectionCap().StartPoseDetection(g_strPose, nId);
@@ -29,16 +39,20 @@ void XN_CALLBACK_TYPE User_NewUser(xn::UserGenerator& generator, XnUserID nId, v
 
 void XN_CALLBACK_TYPE User_LostUser(xn::UserGenerator& generator, XnUserID nId, void* pCookie) {
 	ROS_INFO("Lost user %d", nId);
+    calibrated_users.erase(std::remove(calibrated_users.begin(), calibrated_users.end(), nId), calibrated_users.end());
+    --user_count;
 }
 
 void XN_CALLBACK_TYPE UserCalibration_CalibrationStart(xn::SkeletonCapability& capability, XnUserID nId, void* pCookie) {
 	ROS_INFO("Calibration started for user %d", nId);
+
 }
 
 void XN_CALLBACK_TYPE UserCalibration_CalibrationEnd(xn::SkeletonCapability& capability, XnUserID nId, XnBool bSuccess, void* pCookie) {
 	if (bSuccess) {
 		ROS_INFO("Calibration complete, start tracking user %d", nId);
 		g_UserGenerator.GetSkeletonCap().StartTracking(nId);
+        calibrated_users.push_back(nId);
 	}
 	else {
 		ROS_INFO("Calibration failed for user %d", nId);
@@ -137,6 +151,8 @@ int main(int argc, char **argv) {
     ros::init(argc, argv, "openni_tracker");
     ros::NodeHandle nh;
 
+    user_pub = nh.advertise<art_msgs::UserStatus>("/art_table_pointing/user_status", 1);
+
     string configFilename = ros::package::getPath("openni_tracker") + "/openni_tracker.xml";
     XnStatus nRetVal = g_Context.InitFromXmlFile(configFilename.c_str());
     CHECK_RC(nRetVal, "InitFromXml");
@@ -188,10 +204,27 @@ int main(int argc, char **argv) {
         ros::NodeHandle pnh("~");
         string frame_id("openni_depth_frame");
         pnh.getParam("camera_frame_id", frame_id);
-                
+    int i = 0;
 	while (ros::ok()) {
 		g_Context.WaitAndUpdateAll();
 		publishTransforms(frame_id);
+        if (i > 10) {
+            art_msgs::UserStatus user;
+            user.header.stamp = ros::Time::now();
+            user.user_id = 0;
+            if (calibrated_users.size() > 0) {
+                user.user_id = calibrated_users[0];
+                user.user_state = user.USER_CALIBRATED;
+            } else if (user_count > 0) {
+                user.user_state = user.USER_NOT_CALIBRATED;
+            } else {
+                user.user_state = user.NO_USER;
+            }
+            user_pub.publish(user);
+            i = 0;
+        }
+        ++i;
+        ros::spinOnce();
 		r.sleep();
 	}
 
