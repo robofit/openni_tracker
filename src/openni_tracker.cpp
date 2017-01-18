@@ -151,7 +151,7 @@ int main(int argc, char **argv) {
     ros::init(argc, argv, "openni_tracker");
     ros::NodeHandle nh;
 
-    user_pub = nh.advertise<art_msgs::UserStatus>("/art_table_pointing/user_status", 1);
+    user_pub = nh.advertise<art_msgs::UserStatus>("/art/user/status", 1);
 
     string configFilename = ros::package::getPath("openni_tracker") + "/openni_tracker.xml";
     XnStatus nRetVal = g_Context.InitFromXmlFile(configFilename.c_str());
